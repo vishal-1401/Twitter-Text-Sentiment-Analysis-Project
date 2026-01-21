@@ -2,9 +2,10 @@ streamlit
 langchain
 langchain-community
 langchain-core
+chromadb
 transformers
-torch
 sentence-transformers
-scikit-learn
+torch
 numpy
 pandas
+scikit-learn
