@@ -1,11 +1,26 @@
-import streamlit as st
+import os
 import pickle
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_community.llms import HuggingFacePipeline
-from transformers import pipeline
+import streamlit as st
 
-# ---------- LOAD ML MODEL ----------
+from transformers import pipeline
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_community.llms import HuggingFacePipeline
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import TextLoader
+
+# ==============================
+# STREAMLIT CONFIG
+# ==============================
+st.set_page_config(
+    page_title="Twitter Sentiment Analysis (RAG)",
+    page_icon="🐦",
+    layout="centered"
+)
+
+# ==============================
+# LOAD ML MODEL
+# ==============================
 @st.cache_resource
 def load_ml_model():
     with open("model.pkl", "rb") as f:
@@ -13,50 +28,93 @@ def load_ml_model():
 
 ml_model = load_ml_model()
 
-# ---------- LOAD VECTOR DB ----------
+# ==============================
+# LOAD EMBEDDINGS
+# ==============================
 @st.cache_resource
-def load_db():
-    embeddings = HuggingFaceEmbeddings(
+def load_embeddings():
+    return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
-    return FAISS.load_local(
-        "vector_db",
+
+embeddings = load_embeddings()
+
+# ==============================
+# CREATE VECTOR DB (ONLY ONCE)
+# ==============================
+def create_db():
+    loader = TextLoader("data.txt", encoding="utf-8")
+    documents = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50
+    )
+    docs = splitter.split_documents(documents)
+
+    Chroma.from_documents(
+        docs,
         embeddings,
-        allow_dangerous_deserialization=True
+        persist_directory="vector_db"
+    )
+
+# ==============================
+# LOAD VECTOR DB (CHROMA)
+# ==============================
+@st.cache_resource
+def load_db():
+    if not os.path.exists("vector_db"):
+        create_db()
+
+    return Chroma(
+        persist_directory="vector_db",
+        embedding_function=embeddings
     )
 
 db = load_db()
 retriever = db.as_retriever(search_kwargs={"k": 2})
 
-# ---------- LOAD LLM ----------
+# ==============================
+# LOAD LLM (FLAN-T5)
+# ==============================
 @st.cache_resource
-
 def load_llm():
-    gen = pipeline(
-        "text-generation",
+    gen_pipeline = pipeline(
+        "text2text-generation",   # ✅ CORRECT FOR FLAN-T5
         model="google/flan-t5-small",
         max_new_tokens=120
     )
-    return HuggingFacePipeline(pipeline=gen)
-
+    return HuggingFacePipeline(pipeline=gen_pipeline)
 
 llm = load_llm()
 
-# ---------- UI ----------
+# ==============================
+# UI
+# ==============================
+st.title("🐦 Twitter Text Sentiment Analysis")
+st.write("ML + RAG (LangChain + ChromaDB)")
+
 tweet = st.text_input("✍️ Enter Tweet")
 
 if st.button("Analyze"):
     if tweet.strip() == "":
         st.warning("Please enter text")
     else:
-        # ML prediction
+        # ------------------------------
+        # ML Prediction
+        # ------------------------------
         ml_pred = ml_model.predict([tweet])[0]
         ml_sentiment = "Positive" if ml_pred == 1 else "Negative"
 
-        # RAG retrieval
+        # ------------------------------
+        # RAG Retrieval
+        # ------------------------------
         docs = retriever.invoke(tweet)
         context = "\n".join(d.page_content for d in docs)
 
+        # ------------------------------
+        # Prompt
+        # ------------------------------
         prompt = f"""
 You are validating a sentiment classification.
 
@@ -76,6 +134,10 @@ Confidence:
 
         final_result = llm.invoke(prompt)
 
+        # ------------------------------
+        # OUTPUT
+        # ------------------------------
         st.subheader("📊 Result")
         st.write(final_result)
+
 
