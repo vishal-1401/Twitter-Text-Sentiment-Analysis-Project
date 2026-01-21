@@ -1,4 +1,3 @@
-import os
 import pickle
 import streamlit as st
 
@@ -6,8 +5,6 @@ from transformers import pipeline
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_community.llms import HuggingFacePipeline
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import TextLoader
 
 # ==============================
 # STREAMLIT CONFIG
@@ -40,32 +37,11 @@ def load_embeddings():
 embeddings = load_embeddings()
 
 # ==============================
-# CREATE VECTOR DB (ONLY ONCE)
-# ==============================
-def create_db():
-    loader = TextLoader("data.txt", encoding="utf-8")
-    documents = loader.load()
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
-    )
-    docs = splitter.split_documents(documents)
-
-    Chroma.from_documents(
-        docs,
-        embeddings,
-        persist_directory="vector_db"
-    )
-
-# ==============================
-# LOAD VECTOR DB (CHROMA)
+# LOAD VECTOR DB (CHROMA ONLY)
+# vector_db is already created locally
 # ==============================
 @st.cache_resource
 def load_db():
-    if not os.path.exists("vector_db"):
-        create_db()
-
     return Chroma(
         persist_directory="vector_db",
         embedding_function=embeddings
@@ -80,7 +56,7 @@ retriever = db.as_retriever(search_kwargs={"k": 2})
 @st.cache_resource
 def load_llm():
     gen_pipeline = pipeline(
-        "text2text-generation",   # ✅ CORRECT FOR FLAN-T5
+        "text2text-generation",
         model="google/flan-t5-small",
         max_new_tokens=120
     )
@@ -92,7 +68,7 @@ llm = load_llm()
 # UI
 # ==============================
 st.title("🐦 Twitter Text Sentiment Analysis")
-st.write("ML + RAG (LangChain + ChromaDB)")
+st.write("Machine Learning + RAG (LangChain + ChromaDB)")
 
 tweet = st.text_input("✍️ Enter Tweet")
 
@@ -139,5 +115,3 @@ Confidence:
         # ------------------------------
         st.subheader("📊 Result")
         st.write(final_result)
-
-
