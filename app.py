@@ -1,23 +1,19 @@
-import pickle
 import streamlit as st
+import pickle
 
 from transformers import pipeline
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain_community.llms import HuggingFacePipeline
 
-# ==============================
-# STREAMLIT CONFIG
-# ==============================
+# ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="Twitter Sentiment Analysis (RAG)",
+    page_title="Twitter Sentiment Analysis",
     page_icon="🐦",
     layout="centered"
 )
 
-# ==============================
-# LOAD ML MODEL
-# ==============================
+# ---------- LOAD ML MODEL ----------
 @st.cache_resource
 def load_ml_model():
     with open("model.pkl", "rb") as f:
@@ -25,74 +21,58 @@ def load_ml_model():
 
 ml_model = load_ml_model()
 
-# ==============================
-# LOAD EMBEDDINGS
-# ==============================
+# ---------- LOAD VECTOR DB ----------
 @st.cache_resource
-def load_embeddings():
-    return HuggingFaceEmbeddings(
+def load_db():
+    embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-embeddings = load_embeddings()
-
-# ==============================
-# LOAD VECTOR DB (CHROMA ONLY)
-# vector_db is already created locally
-# ==============================
-@st.cache_resource
-def load_db():
-    return Chroma(
-        persist_directory="vector_db",
-        embedding_function=embeddings
+    db = FAISS.load_local(
+        folder_path="vector_db",
+        embeddings=embeddings,
+        allow_dangerous_deserialization=True
     )
+    return db
 
 db = load_db()
 retriever = db.as_retriever(search_kwargs={"k": 2})
 
-# ==============================
-# LOAD LLM (FLAN-T5)
-# ==============================
+# ---------- LOAD LLM ----------
 @st.cache_resource
 def load_llm():
-    gen_pipeline = pipeline(
-        "text2text-generation",
+    hf_pipeline = pipeline(
+        task="text-generation",
         model="google/flan-t5-small",
         max_new_tokens=120
     )
-    return HuggingFacePipeline(pipeline=gen_pipeline)
+
+    llm = HuggingFacePipeline(pipeline=hf_pipeline)
+    return llm
 
 llm = load_llm()
 
-# ==============================
-# UI
-# ==============================
+# ---------- UI ----------
 st.title("🐦 Twitter Text Sentiment Analysis")
-st.write("Machine Learning + RAG (LangChain + ChromaDB)")
+st.write("Hybrid ML + RAG + LLM sentiment validation")
 
-tweet = st.text_input("✍️ Enter Tweet")
+tweet = st.text_area("✍️ Enter Tweet", height=100)
 
 if st.button("Analyze"):
-    if tweet.strip() == "":
-        st.warning("Please enter text")
+    if not tweet.strip():
+        st.warning("Please enter some text")
     else:
-        # ------------------------------
-        # ML Prediction
-        # ------------------------------
+        # ----- Traditional ML Prediction -----
         ml_pred = ml_model.predict([tweet])[0]
         ml_sentiment = "Positive" if ml_pred == 1 else "Negative"
 
-        # ------------------------------
-        # RAG Retrieval
-        # ------------------------------
+        # ----- Retrieve Similar Examples -----
         docs = retriever.invoke(tweet)
         context = "\n".join(d.page_content for d in docs)
 
-        # ------------------------------
-        # Prompt
-        # ------------------------------
+        # ----- LLM Prompt -----
         prompt = f"""
-You are validating a sentiment classification.
+Classify the sentiment of the tweet using the examples below.
 
 ML Prediction: {ml_sentiment}
 
@@ -100,18 +80,19 @@ Similar labeled examples:
 {context}
 
 Tweet:
-"{tweet}"
+{tweet}
 
-Return:
+Respond ONLY in this format:
+
 Sentiment:
 Explanation:
 Confidence:
 """
 
-        final_result = llm.invoke(prompt)
+        # ----- LLM Inference -----
+        result = llm.invoke(prompt)
 
-        # ------------------------------
-        # OUTPUT
-        # ------------------------------
+        # ----- Display Result -----
         st.subheader("📊 Result")
-        st.write(final_result)
+        result = llm.invoke(prompt)
+        st.markdown(result)
