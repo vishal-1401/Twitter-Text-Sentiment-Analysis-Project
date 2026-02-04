@@ -5,9 +5,11 @@ langchain-community==0.0.38
 langchain-core==0.1.52
 
 chromadb
-transformers
 sentence-transformers
-torch
 numpy
 pandas
 scikit-learn
+
+torch
+transformers==4.41.2
+sentencepiece
